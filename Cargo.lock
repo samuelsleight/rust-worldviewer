@@ -1217,6 +1217,7 @@ dependencies = [
 name = "worldviewer"
 version = "0.1.0"
 dependencies = [
+ "bytemuck",
  "stateloop",
  "vulkano",
  "vulkano-shaders",

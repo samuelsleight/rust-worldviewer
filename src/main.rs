@@ -1,4 +1,4 @@
-use renderer::Renderer;
+use renderer::{InitError, Renderer};
 use stateloop::{
     app::{App, Data, Event, Window},
     state::Action,
@@ -34,7 +34,11 @@ impl MainHandler for AppData {
 
     fn handle_tick(&mut self) {}
 
-    fn handle_render(&self) {}
+    fn handle_render(&self) {
+        self.data
+            .renderer
+            .render(self.window().window().inner_size());
+    }
 }
 
 fn main() {
@@ -53,8 +57,9 @@ fn main() {
 
     App::new(
         move |event_loop| Renderer::construct_window(event_loop, constructor_instance),
-        move |surface| Storage {
-            renderer: Renderer::init_vulkan(instance, surface),
+        move |surface| -> Result<_, InitError> {
+            let renderer = Renderer::init_vulkan(&instance, surface)?;
+            Ok(Storage { renderer })
         },
     )
     .expect("Unable to initialise application")
