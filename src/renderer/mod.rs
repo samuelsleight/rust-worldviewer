@@ -1,15 +1,14 @@
-use stateloop::{
-    app::{EventLoop, Window},
-    winit::dpi::PhysicalSize,
-};
+use stateloop::app::{EventLoop, Window};
 use std::{cell::RefCell, sync::Arc};
 use vulkano::{
     buffer::{
-        immutable::ImmutableBufferCreationError, BufferUsage, ImmutableBuffer, TypedBufferAccess,
+        immutable::ImmutableBufferCreationError, BufferUsage, CpuBufferPool, ImmutableBuffer,
+        TypedBufferAccess,
     },
     command_buffer::{
         AutoCommandBufferBuilder, CommandBufferUsage, RenderPassBeginInfo, SubpassContents,
     },
+    descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet},
     device::{physical::SurfacePropertiesError, Device, DeviceCreationError, Queue},
     image::{view::ImageView, ImageAccess, SwapchainImage},
     instance::Instance,
@@ -20,7 +19,7 @@ use vulkano::{
             viewport::{Viewport, ViewportState},
             GraphicsPipelineCreationError,
         },
-        GraphicsPipeline,
+        GraphicsPipeline, Pipeline, PipelineBindPoint,
     },
     render_pass::{
         Framebuffer, FramebufferCreateInfo, RenderPass, RenderPassCreationError, Subpass,
@@ -35,7 +34,7 @@ use vulkano::{
 };
 use vulkano_win::CreationError;
 
-use self::vertex::Vertex;
+use self::{shaders::SceneData, vertex::Vertex};
 
 mod init;
 mod shaders;
@@ -52,6 +51,7 @@ struct RendererData {
     objects: CoreObjects,
 
     vertex_buffer: Arc<ImmutableBuffer<[Vertex]>>,
+    uniform_buffer: CpuBufferPool<SceneData>,
     pipeline: Arc<GraphicsPipeline>,
     render_pass: Arc<RenderPass>,
     framebuffers: Option<Vec<Arc<Framebuffer>>>,
@@ -75,7 +75,7 @@ pub enum InitError {
     UnableToCreateRenderPass(RenderPassCreationError),
     UnableToCreatePipeline(GraphicsPipelineCreationError),
     UnableToLoadShaders(ShaderCreationError),
-    UnableToCreateBuffer(ImmutableBufferCreationError),
+    UnableToCreateVertexBuffer(ImmutableBufferCreationError),
 }
 
 impl Renderer {
@@ -121,13 +121,13 @@ impl Renderer {
         let (vertex_buffer, buffer_future) = ImmutableBuffer::from_iter(
             [
                 Vertex {
-                    position: [-0.5, -0.25],
+                    position: [100.0, 200.0],
                 },
                 Vertex {
-                    position: [0.0, 0.5],
+                    position: [500.0, 150.0],
                 },
                 Vertex {
-                    position: [0.25, -0.3],
+                    position: [400.0, 600.0],
                 },
             ]
             .iter()
@@ -135,7 +135,9 @@ impl Renderer {
             BufferUsage::vertex_buffer(),
             objects.queue.clone(),
         )
-        .map_err(InitError::UnableToCreateBuffer)?;
+        .map_err(InitError::UnableToCreateVertexBuffer)?;
+
+        let uniform_buffer = CpuBufferPool::<SceneData>::uniform_buffer(objects.device.clone());
 
         let pipeline = GraphicsPipeline::start()
             .vertex_input_state(BuffersDefinition::new().vertex::<Vertex>())
@@ -152,6 +154,7 @@ impl Renderer {
                 objects,
 
                 vertex_buffer,
+                uniform_buffer,
                 pipeline,
                 render_pass,
                 framebuffers: None,
@@ -163,11 +166,13 @@ impl Renderer {
         })
     }
 
-    pub fn render(&self, dimensions: PhysicalSize<u32>) {
+    pub fn render(&self, surface: &Arc<Surface<Window>>) {
         let mut data = self.data.borrow_mut();
 
         let mut frame_future = data.frame_future.take().unwrap();
         frame_future.cleanup_finished();
+
+        let dimensions = surface.window().inner_size();
 
         if data.recreate_swapchain {
             let (swapchain, images) = match data.objects.swapchain.recreate(SwapchainCreateInfo {
@@ -210,6 +215,23 @@ impl Renderer {
             data.framebuffers = Some(framebuffers);
         }
 
+        let uniform_buffer = data
+            .uniform_buffer
+            .next(SceneData {
+                size: surface
+                    .window()
+                    .inner_size()
+                    .to_logical::<f32>(surface.window().scale_factor())
+                    .into(),
+            })
+            .unwrap();
+
+        let descriptor_set = PersistentDescriptorSet::new(
+            data.pipeline.layout().set_layouts().get(0).unwrap().clone(),
+            [WriteDescriptorSet::buffer(0, uniform_buffer)],
+        )
+        .unwrap();
+
         let (image_num, suboptimal, acquire_future) =
             match acquire_next_image(data.objects.swapchain.clone(), None) {
                 Ok(result) => result,
@@ -244,6 +266,12 @@ impl Renderer {
             .unwrap()
             .set_viewport(0, [data.viewport.clone()])
             .bind_pipeline_graphics(data.pipeline.clone())
+            .bind_descriptor_sets(
+                PipelineBindPoint::Graphics,
+                data.pipeline.layout().clone(),
+                0,
+                descriptor_set,
+            )
             .bind_vertex_buffers(0, data.vertex_buffer.clone())
             .draw(data.vertex_buffer.len() as u32, 1, 0, 0)
             .unwrap()

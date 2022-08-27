@@ -9,6 +9,11 @@ mod vs {
     vulkano_shaders::shader! {
         ty: "vertex",
         path: "src/renderer/shaders/vertex.glsl",
+        types_meta: {
+            use bytemuck::{Pod, Zeroable};
+
+            #[derive(Clone, Copy, Zeroable, Pod)]
+        },
     }
 }
 
@@ -23,6 +28,8 @@ pub struct Shaders {
     pub vertex: Arc<ShaderModule>,
     pub fragment: Arc<ShaderModule>,
 }
+
+pub use vs::ty::SceneData;
 
 pub fn load(device: Arc<Device>) -> Result<Shaders, ShaderCreationError> {
     Ok(Shaders {
