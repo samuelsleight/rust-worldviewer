@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use stateloop::winit::dpi::LogicalSize;
 use vulkano::{
     device::Device,
     shader::{ShaderCreationError, ShaderModule},
@@ -29,6 +30,7 @@ pub struct Shaders {
     pub fragment: Arc<ShaderModule>,
 }
 
+pub use vs::ty::MeshData;
 pub use vs::ty::SceneData;
 
 pub fn load(device: Arc<Device>) -> Result<Shaders, ShaderCreationError> {
@@ -36,4 +38,10 @@ pub fn load(device: Arc<Device>) -> Result<Shaders, ShaderCreationError> {
         vertex: vs::load(device.clone())?,
         fragment: fs::load(device.clone())?,
     })
+}
+
+impl From<LogicalSize<f32>> for SceneData {
+    fn from(size: LogicalSize<f32>) -> Self {
+        Self { size: size.into() }
+    }
 }

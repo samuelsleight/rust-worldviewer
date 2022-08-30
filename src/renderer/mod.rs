@@ -3,12 +3,7 @@ use std::{cell::RefCell, sync::Arc};
 use vulkano::{
     buffer::{
         immutable::ImmutableBufferCreationError, BufferUsage, CpuBufferPool, ImmutableBuffer,
-        TypedBufferAccess,
     },
-    command_buffer::{
-        AutoCommandBufferBuilder, CommandBufferUsage, RenderPassBeginInfo, SubpassContents,
-    },
-    descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet},
     device::{physical::SurfacePropertiesError, Device, DeviceCreationError, Queue},
     image::{view::ImageView, ImageAccess, SwapchainImage},
     instance::Instance,
@@ -19,7 +14,7 @@ use vulkano::{
             viewport::{Viewport, ViewportState},
             GraphicsPipelineCreationError,
         },
-        GraphicsPipeline, Pipeline, PipelineBindPoint,
+        GraphicsPipeline,
     },
     render_pass::{
         Framebuffer, FramebufferCreateInfo, RenderPass, RenderPassCreationError, Subpass,
@@ -34,8 +29,13 @@ use vulkano::{
 };
 use vulkano_win::CreationError;
 
-use self::{shaders::SceneData, vertex::Vertex};
+use self::{
+    frame::{frame_state, RenderFrame},
+    shaders::SceneData,
+    vertex::Vertex,
+};
 
+mod frame;
 mod init;
 mod shaders;
 mod vertex;
@@ -47,7 +47,7 @@ pub struct CoreObjects {
     images: Vec<Arc<SwapchainImage<Window>>>,
 }
 
-struct RendererData {
+pub struct RendererData {
     objects: CoreObjects,
 
     vertex_buffer: Arc<ImmutableBuffer<[Vertex]>>,
@@ -166,7 +166,10 @@ impl Renderer {
         })
     }
 
-    pub fn render(&self, surface: &Arc<Surface<Window>>) {
+    pub fn render<F>(&self, surface: &Arc<Surface<Window>>, frame_callback: F)
+    where
+        F: FnOnce(RenderFrame<frame_state::RenderPass>) -> RenderFrame<frame_state::Done>,
+    {
         let mut data = self.data.borrow_mut();
 
         let mut frame_future = data.frame_future.take().unwrap();
@@ -215,23 +218,6 @@ impl Renderer {
             data.framebuffers = Some(framebuffers);
         }
 
-        let uniform_buffer = data
-            .uniform_buffer
-            .next(SceneData {
-                size: surface
-                    .window()
-                    .inner_size()
-                    .to_logical::<f32>(surface.window().scale_factor())
-                    .into(),
-            })
-            .unwrap();
-
-        let descriptor_set = PersistentDescriptorSet::new(
-            data.pipeline.layout().set_layouts().get(0).unwrap().clone(),
-            [WriteDescriptorSet::buffer(0, uniform_buffer)],
-        )
-        .unwrap();
-
         let (image_num, suboptimal, acquire_future) =
             match acquire_next_image(data.objects.swapchain.clone(), None) {
                 Ok(result) => result,
@@ -246,38 +232,14 @@ impl Renderer {
             data.recreate_swapchain = true;
         }
 
-        let mut builder = AutoCommandBufferBuilder::primary(
-            data.objects.device.clone(),
-            data.objects.queue.family(),
-            CommandBufferUsage::OneTimeSubmit,
-        )
-        .unwrap();
+        let frame = RenderFrame::new(&mut data, image_num).begin(
+            surface
+                .window()
+                .inner_size()
+                .to_logical::<f32>(surface.window().scale_factor()),
+        );
 
-        builder
-            .begin_render_pass(
-                RenderPassBeginInfo {
-                    clear_values: vec![Some([1.0, 0.0, 1.0, 1.0].into())],
-                    ..RenderPassBeginInfo::framebuffer(
-                        data.framebuffers.as_ref().unwrap()[image_num].clone(),
-                    )
-                },
-                SubpassContents::Inline,
-            )
-            .unwrap()
-            .set_viewport(0, [data.viewport.clone()])
-            .bind_pipeline_graphics(data.pipeline.clone())
-            .bind_descriptor_sets(
-                PipelineBindPoint::Graphics,
-                data.pipeline.layout().clone(),
-                0,
-                descriptor_set,
-            )
-            .bind_vertex_buffers(0, data.vertex_buffer.clone())
-            .draw(data.vertex_buffer.len() as u32, 1, 0, 0)
-            .unwrap()
-            .end_render_pass()
-            .unwrap();
-
+        let builder = frame_callback(frame).unwrap();
         let command_buffer = builder.build().unwrap();
 
         let future = frame_future
