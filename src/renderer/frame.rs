@@ -1,5 +1,5 @@
 use stateloop::winit::dpi::LogicalSize;
-use std::marker::PhantomData;
+use std::{marker::PhantomData, sync::Arc};
 use vulkano::{
     command_buffer::{
         pool::standard::{StandardCommandPoolAlloc, StandardCommandPoolBuilder},
@@ -7,6 +7,7 @@ use vulkano::{
         RenderPassBeginInfo, SubpassContents,
     },
     descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet},
+    image::ImageViewAbstract,
     pipeline::{Pipeline, PipelineBindPoint},
 };
 
@@ -59,14 +60,7 @@ impl<'data> RenderFrame<'data, frame_state::Begin> {
                 .get(0)
                 .unwrap()
                 .clone(),
-            [
-                WriteDescriptorSet::buffer(0, uniform_buffer),
-                WriteDescriptorSet::image_view_sampler(
-                    1,
-                    self.data.texture.clone(),
-                    self.data.sampler.clone(),
-                ),
-            ],
+            [WriteDescriptorSet::buffer(0, uniform_buffer)],
         )
         .unwrap();
 
@@ -101,7 +95,23 @@ impl<'data> RenderFrame<'data, frame_state::Begin> {
 }
 
 impl<'data> RenderFrame<'data, frame_state::RenderPass> {
-    pub fn draw(mut self, position: LogicalSize<f32>) -> Self {
+    pub fn draw(mut self, position: LogicalSize<f32>, texture: Arc<dyn ImageViewAbstract>) -> Self {
+        let descriptor_set = PersistentDescriptorSet::new(
+            self.data
+                .pipeline
+                .layout()
+                .set_layouts()
+                .get(1)
+                .unwrap()
+                .clone(),
+            [WriteDescriptorSet::image_view_sampler(
+                0,
+                texture,
+                self.data.sampler.clone(),
+            )],
+        )
+        .unwrap();
+
         self.builder
             .push_constants(
                 self.data.pipeline.layout().clone(),
@@ -109,6 +119,12 @@ impl<'data> RenderFrame<'data, frame_state::RenderPass> {
                 MeshData {
                     offset: position.into(),
                 },
+            )
+            .bind_descriptor_sets(
+                PipelineBindPoint::Graphics,
+                self.data.pipeline.layout().clone(),
+                1,
+                descriptor_set,
             )
             .draw(4, 1, 0, 0)
             .unwrap();

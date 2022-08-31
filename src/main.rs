@@ -6,6 +6,8 @@ use stateloop::{
 };
 use std::sync::Arc;
 use vulkano::{
+    format::Format,
+    image::ImageViewAbstract,
     instance::{Instance, InstanceCreateInfo},
     swapchain::Surface,
 };
@@ -20,6 +22,7 @@ states! {
 
 struct Storage {
     renderer: Renderer,
+    textures: Vec<Arc<dyn ImageViewAbstract>>,
 }
 
 type AppData = Data<Storage, Arc<Surface<Window>>>;
@@ -36,7 +39,10 @@ impl MainHandler for AppData {
 
     fn handle_render(&self) {
         self.data.renderer.render(self.window(), |frame| {
-            frame.draw([0, 0].into()).draw([600, 350].into()).finish()
+            frame
+                .draw([0, 0].into(), self.data.textures[1].clone())
+                .draw([600, 350].into(), self.data.textures[0].clone())
+                .finish()
         });
     }
 }
@@ -59,7 +65,33 @@ fn main() {
         move |event_loop| Renderer::construct_window(event_loop, constructor_instance),
         move |surface| -> Result<_, InitError> {
             let renderer = Renderer::init_vulkan(&instance, surface)?;
-            Ok(Storage { renderer })
+            let textures = vec![
+                renderer.create_texture([u8::MAX; 16], 2, 2, Format::R8G8B8A8_SRGB),
+                renderer.create_texture(
+                    [
+                        0,
+                        0,
+                        0,
+                        u8::MAX,
+                        0,
+                        0,
+                        0,
+                        u8::MAX,
+                        0,
+                        0,
+                        0,
+                        u8::MAX,
+                        0,
+                        0,
+                        0,
+                        u8::MAX,
+                    ],
+                    2,
+                    2,
+                    Format::R8G8B8A8_SRGB,
+                ),
+            ];
+            Ok(Storage { renderer, textures })
         },
     )
     .expect("Unable to initialise application")

@@ -7,7 +7,8 @@ use vulkano::{
     device::{physical::SurfacePropertiesError, Device, DeviceCreationError, Queue},
     format::Format,
     image::{
-        view::ImageView, ImageAccess, ImageDimensions, ImmutableImage, MipmapsCount, SwapchainImage,
+        view::ImageView, ImageAccess, ImageDimensions, ImageViewAbstract, ImmutableImage,
+        MipmapsCount, SwapchainImage,
     },
     instance::Instance,
     pipeline::{
@@ -61,7 +62,6 @@ pub struct RendererData {
     render_pass: Arc<RenderPass>,
     framebuffers: Option<Vec<Arc<Framebuffer>>>,
 
-    texture: Arc<ImageView<ImmutableImage>>,
     sampler: Arc<Sampler>,
 
     viewport: Viewport,
@@ -143,23 +143,6 @@ impl Renderer {
         let uniform_buffer = CpuBufferPool::<SceneData>::uniform_buffer(objects.device.clone());
         let subpass = Subpass::from(render_pass.clone(), 0).unwrap();
 
-        let (texture, texture_future) = {
-            let (image, future) = ImmutableImage::from_iter(
-                [u8::MAX; 16],
-                ImageDimensions::Dim2d {
-                    width: 2,
-                    height: 2,
-                    array_layers: 1,
-                },
-                MipmapsCount::One,
-                Format::R8G8B8A8_SRGB,
-                objects.queue.clone(),
-            )
-            .unwrap();
-
-            (ImageView::new_default(image).unwrap(), future)
-        };
-
         let sampler = Sampler::new(
             objects.device.clone(),
             SamplerCreateInfo {
@@ -187,8 +170,6 @@ impl Renderer {
             .build(objects.device.clone())
             .map_err(InitError::UnableToCreatePipeline)?;
 
-        let future = buffer_future.join(texture_future);
-
         Ok(Self {
             data: RefCell::new(RendererData {
                 objects,
@@ -199,14 +180,51 @@ impl Renderer {
                 render_pass,
                 framebuffers: None,
 
-                texture,
                 sampler,
 
                 viewport,
-                frame_future: Some(Box::new(future)),
+                frame_future: Some(Box::new(buffer_future)),
                 recreate_swapchain: false,
             }),
         })
+    }
+
+    pub fn create_texture<I>(
+        &self,
+        input: I,
+        width: u32,
+        height: u32,
+        format: Format,
+    ) -> Arc<dyn ImageViewAbstract>
+    where
+        I: IntoIterator<Item = u8>,
+        I::IntoIter: ExactSizeIterator,
+    {
+        let mut data = self.data.borrow_mut();
+
+        let frame_future = data.frame_future.take().unwrap();
+
+        let (texture, texture_future) = {
+            let (image, future) = ImmutableImage::from_iter(
+                input,
+                ImageDimensions::Dim2d {
+                    width,
+                    height,
+                    array_layers: 1,
+                },
+                MipmapsCount::One,
+                format,
+                data.objects.queue.clone(),
+            )
+            .unwrap();
+
+            (ImageView::new_default(image).unwrap(), future)
+        };
+
+        let frame_future = frame_future.join(texture_future);
+        data.frame_future = Some(Box::new(frame_future));
+
+        texture
     }
 
     pub fn render<F>(&self, surface: &Arc<Surface<Window>>, frame_callback: F)
