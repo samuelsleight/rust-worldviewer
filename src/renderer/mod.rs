@@ -1,15 +1,19 @@
 use stateloop::app::{EventLoop, Window};
-use std::{cell::RefCell, sync::Arc};
+use std::{cell::RefCell, sync::Arc, u8};
 use vulkano::{
     buffer::{
         immutable::ImmutableBufferCreationError, BufferUsage, CpuBufferPool, ImmutableBuffer,
     },
     device::{physical::SurfacePropertiesError, Device, DeviceCreationError, Queue},
-    image::{view::ImageView, ImageAccess, SwapchainImage},
+    format::Format,
+    image::{
+        view::ImageView, ImageAccess, ImageDimensions, ImmutableImage, MipmapsCount, SwapchainImage,
+    },
     instance::Instance,
     pipeline::{
         graphics::{
-            input_assembly::InputAssemblyState,
+            color_blend::ColorBlendState,
+            input_assembly::{InputAssemblyState, PrimitiveTopology},
             vertex_input::BuffersDefinition,
             viewport::{Viewport, ViewportState},
             GraphicsPipelineCreationError,
@@ -19,6 +23,7 @@ use vulkano::{
     render_pass::{
         Framebuffer, FramebufferCreateInfo, RenderPass, RenderPassCreationError, Subpass,
     },
+    sampler::{Filter, Sampler, SamplerAddressMode, SamplerCreateInfo},
     shader::ShaderCreationError,
     single_pass_renderpass,
     swapchain::{
@@ -31,7 +36,7 @@ use vulkano_win::CreationError;
 
 use self::{
     frame::{frame_state, RenderFrame},
-    shaders::SceneData,
+    shaders::{SceneData, VertexConstants},
     vertex::Vertex,
 };
 
@@ -55,6 +60,9 @@ pub struct RendererData {
     pipeline: Arc<GraphicsPipeline>,
     render_pass: Arc<RenderPass>,
     framebuffers: Option<Vec<Arc<Framebuffer>>>,
+
+    texture: Arc<ImageView<ImmutableImage>>,
+    sampler: Arc<Sampler>,
 
     viewport: Viewport,
     frame_future: Option<Box<dyn GpuFuture>>,
@@ -120,15 +128,10 @@ impl Renderer {
 
         let (vertex_buffer, buffer_future) = ImmutableBuffer::from_iter(
             [
-                Vertex {
-                    position: [100.0, 200.0],
-                },
-                Vertex {
-                    position: [500.0, 150.0],
-                },
-                Vertex {
-                    position: [400.0, 600.0],
-                },
+                Vertex::new(0.0, 0.0, 0.0, 0.0),
+                Vertex::new(1.0, 0.0, 1.0, 0.0),
+                Vertex::new(0.0, 1.0, 0.0, 1.0),
+                Vertex::new(1.0, 1.0, 1.0, 1.0),
             ]
             .iter()
             .cloned(),
@@ -138,16 +141,53 @@ impl Renderer {
         .map_err(InitError::UnableToCreateVertexBuffer)?;
 
         let uniform_buffer = CpuBufferPool::<SceneData>::uniform_buffer(objects.device.clone());
+        let subpass = Subpass::from(render_pass.clone(), 0).unwrap();
+
+        let (texture, texture_future) = {
+            let (image, future) = ImmutableImage::from_iter(
+                [u8::MAX; 16],
+                ImageDimensions::Dim2d {
+                    width: 2,
+                    height: 2,
+                    array_layers: 1,
+                },
+                MipmapsCount::One,
+                Format::R8G8B8A8_SRGB,
+                objects.queue.clone(),
+            )
+            .unwrap();
+
+            (ImageView::new_default(image).unwrap(), future)
+        };
+
+        let sampler = Sampler::new(
+            objects.device.clone(),
+            SamplerCreateInfo {
+                mag_filter: Filter::Linear,
+                min_filter: Filter::Linear,
+                address_mode: [SamplerAddressMode::Repeat; 3],
+                ..Default::default()
+            },
+        )
+        .unwrap();
 
         let pipeline = GraphicsPipeline::start()
             .vertex_input_state(BuffersDefinition::new().vertex::<Vertex>())
-            .vertex_shader(shaders.vertex.entry_point("main").unwrap(), ())
-            .input_assembly_state(InputAssemblyState::new())
+            .vertex_shader(
+                shaders.vertex.entry_point("main").unwrap(),
+                VertexConstants { quad_scale: 300.0 },
+            )
+            .input_assembly_state(
+                InputAssemblyState::new().topology(PrimitiveTopology::TriangleStrip),
+            )
             .viewport_state(ViewportState::viewport_dynamic_scissor_irrelevant())
             .fragment_shader(shaders.fragment.entry_point("main").unwrap(), ())
-            .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
+            .color_blend_state(ColorBlendState::new(subpass.num_color_attachments()).blend_alpha())
+            .render_pass(subpass)
             .build(objects.device.clone())
             .map_err(InitError::UnableToCreatePipeline)?;
+
+        let future = buffer_future.join(texture_future);
 
         Ok(Self {
             data: RefCell::new(RendererData {
@@ -159,8 +199,11 @@ impl Renderer {
                 render_pass,
                 framebuffers: None,
 
+                texture,
+                sampler,
+
                 viewport,
-                frame_future: Some(Box::new(buffer_future)),
+                frame_future: Some(Box::new(future)),
                 recreate_swapchain: false,
             }),
         })

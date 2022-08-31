@@ -59,7 +59,14 @@ impl<'data> RenderFrame<'data, frame_state::Begin> {
                 .get(0)
                 .unwrap()
                 .clone(),
-            [WriteDescriptorSet::buffer(0, uniform_buffer)],
+            [
+                WriteDescriptorSet::buffer(0, uniform_buffer),
+                WriteDescriptorSet::image_view_sampler(
+                    1,
+                    self.data.texture.clone(),
+                    self.data.sampler.clone(),
+                ),
+            ],
         )
         .unwrap();
 
@@ -103,7 +110,7 @@ impl<'data> RenderFrame<'data, frame_state::RenderPass> {
                     offset: position.into(),
                 },
             )
-            .draw(3, 1, 0, 0)
+            .draw(4, 1, 0, 0)
             .unwrap();
 
         RenderFrame {

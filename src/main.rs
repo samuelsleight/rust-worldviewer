@@ -35,9 +35,9 @@ impl MainHandler for AppData {
     fn handle_tick(&mut self) {}
 
     fn handle_render(&self) {
-        self.data
-            .renderer
-            .render(self.window(), |frame| frame.draw([0, 0].into()).finish());
+        self.data.renderer.render(self.window(), |frame| {
+            frame.draw([0, 0].into()).draw([600, 350].into()).finish()
+        });
     }
 }
 

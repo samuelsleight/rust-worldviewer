@@ -32,6 +32,7 @@ pub struct Shaders {
 
 pub use vs::ty::MeshData;
 pub use vs::ty::SceneData;
+pub use vs::SpecializationConstants as VertexConstants;
 
 pub fn load(device: Arc<Device>) -> Result<Shaders, ShaderCreationError> {
     Ok(Shaders {
