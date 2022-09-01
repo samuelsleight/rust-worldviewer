@@ -1226,6 +1226,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "worldgen"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a9b77fba24c873b60af296c1f0c5639114186d1ac3c99f880a7bb590bdc04065"
+
+[[package]]
 name = "worldviewer"
 version = "0.1.0"
 dependencies = [
@@ -1234,6 +1240,7 @@ dependencies = [
  "vulkano",
  "vulkano-shaders",
  "vulkano-win",
+ "worldgen",
 ]
 
 [[package]]

@@ -11,8 +11,10 @@ use vulkano::{
     instance::{Instance, InstanceCreateInfo},
     swapchain::Surface,
 };
+use world::World;
 
 mod renderer;
+mod world;
 
 states! {
     State {
@@ -40,8 +42,9 @@ impl MainHandler for AppData {
     fn handle_render(&self) {
         self.data.renderer.render(self.window(), |frame| {
             frame
-                .draw([0, 0].into(), self.data.textures[1].clone())
-                .draw([600, 350].into(), self.data.textures[0].clone())
+                .draw([200, 100].into(), self.data.textures[0].clone())
+                .draw([500, 100].into(), self.data.textures[1].clone())
+                .draw([500, 400].into(), self.data.textures[2].clone())
                 .finish()
         });
     }
@@ -65,29 +68,26 @@ fn main() {
         move |event_loop| Renderer::construct_window(event_loop, constructor_instance),
         move |surface| -> Result<_, InitError> {
             let renderer = Renderer::init_vulkan(&instance, surface)?;
+
+            let world = World::new();
+
             let textures = vec![
-                renderer.create_texture([u8::MAX; 16], 2, 2, Format::R8G8B8A8_SRGB),
                 renderer.create_texture(
-                    [
-                        0,
-                        0,
-                        0,
-                        u8::MAX,
-                        0,
-                        0,
-                        0,
-                        u8::MAX,
-                        0,
-                        0,
-                        0,
-                        u8::MAX,
-                        0,
-                        0,
-                        0,
-                        u8::MAX,
-                    ],
-                    2,
-                    2,
+                    world.generate_chunk_texture(-1, 0),
+                    512,
+                    512,
+                    Format::R8G8B8A8_SRGB,
+                ),
+                renderer.create_texture(
+                    world.generate_chunk_texture(0, 0),
+                    512,
+                    512,
+                    Format::R8G8B8A8_SRGB,
+                ),
+                renderer.create_texture(
+                    world.generate_chunk_texture(0, 1),
+                    512,
+                    512,
                     Format::R8G8B8A8_SRGB,
                 ),
             ];
