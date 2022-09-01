@@ -148,7 +148,7 @@ impl Renderer {
             SamplerCreateInfo {
                 mag_filter: Filter::Linear,
                 min_filter: Filter::Linear,
-                address_mode: [SamplerAddressMode::Repeat; 3],
+                address_mode: [SamplerAddressMode::ClampToEdge; 3],
                 ..Default::default()
             },
         )
