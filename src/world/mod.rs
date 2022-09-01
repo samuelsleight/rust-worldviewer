@@ -14,6 +14,12 @@ pub use self::colour::Colour;
 
 mod colour;
 
+#[derive(Debug, Copy, Clone, Hash, PartialEq, PartialOrd, Eq, Ord)]
+pub struct ChunkKey {
+    pub x: i64,
+    pub y: i64,
+}
+
 pub struct World {
     worldgen: WorldGen<Colour>,
 }
@@ -70,10 +76,9 @@ impl World {
 
     pub fn generate_chunk_texture(
         &self,
-        x: i64,
-        y: i64,
+        key: ChunkKey,
     ) -> impl Iterator<Item = u8> + ExactSizeIterator {
-        let chunk = self.worldgen.generate(x, y);
+        let chunk = self.worldgen.generate(key.x, key.y);
         SizedIteratorWrapper::new(
             chunk
                 .unwrap()
@@ -82,5 +87,11 @@ impl World {
                 .flat_map(Colour::as_array),
             512 * 512 * 4,
         )
+    }
+}
+
+impl ChunkKey {
+    pub fn new(x: i64, y: i64) -> Self {
+        Self { x, y }
     }
 }
