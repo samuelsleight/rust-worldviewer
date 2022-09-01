@@ -28,10 +28,15 @@ states! {
     }
 }
 
+enum TextureEntry {
+    Requested,
+    Valid(Arc<dyn ImageViewAbstract>),
+}
+
 struct Storage {
     renderer: Renderer,
     world: World,
-    textures: HashMap<ChunkKey, Arc<dyn ImageViewAbstract>>,
+    textures: HashMap<ChunkKey, TextureEntry>,
 }
 
 type AppData = Data<Storage, Arc<Surface<Window>>>;
@@ -45,6 +50,18 @@ impl MainHandler for AppData {
     }
 
     fn handle_tick(&mut self) {
+        if let Some(chunk) = self.data.world.get_chunk_result() {
+            self.data.textures.insert(
+                chunk.key,
+                TextureEntry::Valid(self.data.renderer.create_texture(
+                    chunk.texture(),
+                    512,
+                    512,
+                    Format::R8G8B8A8_SRGB,
+                )),
+            );
+        }
+
         for x in 0..5 {
             for y in 0..3 {
                 let key = ChunkKey::new(x, y);
@@ -52,14 +69,8 @@ impl MainHandler for AppData {
                 match self.data.textures.entry(key) {
                     Occupied(_) => continue,
                     Vacant(entry) => {
-                        entry.insert(self.data.renderer.create_texture(
-                            self.data.world.generate_chunk_texture(key),
-                            512,
-                            512,
-                            Format::R8G8B8A8_SRGB,
-                        ));
-
-                        return;
+                        entry.insert(TextureEntry::Requested);
+                        self.data.world.request_chunk(key);
                     }
                 }
             }
@@ -71,7 +82,7 @@ impl MainHandler for AppData {
             for x in 0..5 {
                 for y in 0..3 {
                     let key = ChunkKey::new(x, y);
-                    if let Some(texture) = self.data.textures.get(&key) {
+                    if let Some(&TextureEntry::Valid(ref texture)) = self.data.textures.get(&key) {
                         frame = frame.draw(
                             [(key.x * 300) as f32, (key.y * 300) as f32].into(),
                             texture.clone(),

@@ -1,18 +1,12 @@
-use std::time::Instant;
-
-use worldgen::{
-    constraint,
-    noise::perlin::PerlinNoise,
-    noisemap::{NoiseMap, NoiseMapGenerator, Seed, Step},
-    world::{
-        tile::{Constraint, ConstraintType},
-        Size, Tile, World as WorldGen,
-    },
+use std::{
+    sync::mpsc::{channel, Receiver, Sender},
+    thread::JoinHandle,
 };
 
 pub use self::colour::Colour;
 
 mod colour;
+mod task;
 
 #[derive(Debug, Copy, Clone, Hash, PartialEq, PartialOrd, Eq, Ord)]
 pub struct ChunkKey {
@@ -20,8 +14,15 @@ pub struct ChunkKey {
     pub y: i64,
 }
 
+pub struct Chunk {
+    pub key: ChunkKey,
+    pub data: Vec<Vec<Colour>>,
+}
+
 pub struct World {
-    worldgen: WorldGen<Colour>,
+    tx: Sender<ChunkKey>,
+    rx: Receiver<Chunk>,
+    _thread: JoinHandle<()>,
 }
 
 struct SizedIteratorWrapper<T, I: Iterator<Item = T>> {
@@ -51,40 +52,36 @@ impl<T, I: Iterator<Item = T>> ExactSizeIterator for SizedIteratorWrapper<T, I> 
 
 impl World {
     pub fn new() -> Self {
-        let noise = PerlinNoise::new();
+        let (request_tx, request_rx) = channel();
+        let (result_tx, result_rx) = channel();
 
-        let nm1 = NoiseMap::new(noise)
-            .set(Seed::of(Instant::now()))
-            .set(Step::of(0.005, 0.005));
-
-        let nm2 = NoiseMap::new(noise)
-            .set(Seed::of(Instant::now()))
-            .set(Step::of(0.02, 0.02));
-
-        let nm = Box::new(nm1 * 4 + nm2);
-
-        let worldgen = WorldGen::new()
-            .set(Size::of(512, 512))
-            .add(Tile::new(Colour::new(0, 70, 170)).when(constraint!(nm.clone(), < -0.1)))
-            .add(Tile::new(Colour::new(190, 180, 130)).when(constraint!(nm.clone(), < -0.05)))
-            .add(Tile::new(Colour::new(20, 220, 100)).when(constraint!(nm.clone(), < 0.45)))
-            .add(Tile::new(Colour::new(180, 180, 180)).when(constraint!(nm, < 0.85)))
-            .add(Tile::new(Colour::new(220, 220, 220)));
-
-        Self { worldgen }
+        Self {
+            _thread: std::thread::Builder::new()
+                .name("World Viewer Generation Thread".into())
+                .spawn(move || task::worldgen_task(request_rx, result_tx))
+                .unwrap(),
+            tx: request_tx,
+            rx: result_rx,
+        }
     }
 
-    pub fn generate_chunk_texture(
-        &self,
-        key: ChunkKey,
-    ) -> impl Iterator<Item = u8> + ExactSizeIterator {
-        let chunk = self.worldgen.generate(key.x, key.y);
+    pub fn request_chunk(&self, key: ChunkKey) {
+        self.tx.send(key).unwrap();
+    }
+
+    pub fn get_chunk_result(&self) -> Option<Chunk> {
+        self.rx.try_recv().ok()
+    }
+}
+
+impl Chunk {
+    pub fn new(key: ChunkKey, data: Vec<Vec<Colour>>) -> Self {
+        Self { key, data }
+    }
+
+    pub fn texture(self) -> impl Iterator<Item = u8> + ExactSizeIterator {
         SizedIteratorWrapper::new(
-            chunk
-                .unwrap()
-                .into_iter()
-                .flatten()
-                .flat_map(Colour::as_array),
+            self.data.into_iter().flatten().flat_map(Colour::as_array),
             512 * 512 * 4,
         )
     }
