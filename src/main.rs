@@ -50,7 +50,7 @@ impl MainHandler for AppData {
     }
 
     fn handle_tick(&mut self) {
-        if let Some(chunk) = self.data.world.get_chunk_result() {
+        while let Some(chunk) = self.data.world.get_chunk_result() {
             self.data.textures.insert(
                 chunk.key,
                 TextureEntry::Valid(self.data.renderer.create_texture(

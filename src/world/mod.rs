@@ -1,7 +1,6 @@
-use std::{
-    sync::mpsc::{channel, Receiver, Sender},
-    thread::JoinHandle,
-};
+use std::thread::JoinHandle;
+
+use crossbeam_channel::{Receiver, Sender};
 
 pub use self::colour::Colour;
 
@@ -52,8 +51,8 @@ impl<T, I: Iterator<Item = T>> ExactSizeIterator for SizedIteratorWrapper<T, I> 
 
 impl World {
     pub fn new() -> Self {
-        let (request_tx, request_rx) = channel();
-        let (result_tx, result_rx) = channel();
+        let (request_tx, request_rx) = crossbeam_channel::unbounded();
+        let (result_tx, result_rx) = crossbeam_channel::unbounded();
 
         Self {
             _thread: std::thread::Builder::new()
