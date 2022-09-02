@@ -49,21 +49,17 @@ pub fn worldgen_task(rx: Receiver<ChunkKey>, tx: Sender<Chunk>) {
     };
 
     std::thread::scope(|scope| {
-        let mut handles = Vec::new();
-
         for _ in 0..12 {
             let thread_rx = rx.clone();
             let thread_tx = tx.clone();
             let thread_wg = &worldgen;
 
-            handles.push(scope.spawn(move || {
+            scope.spawn(move || {
                 while let Ok(key) = thread_rx.recv() {
                     let data = thread_wg.generate_chunk(key.x, key.y);
                     thread_tx.send(Chunk::new(key, data)).unwrap()
                 }
-            }));
+            });
         }
-
-        handles.clear()
     })
 }
