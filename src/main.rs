@@ -36,14 +36,40 @@ enum TextureEntry {
 struct Storage {
     renderer: Renderer,
     world: World,
+    bounds: (u32, u32),
     textures: HashMap<ChunkKey, TextureEntry>,
 }
 
 type AppData = Data<Storage, Arc<Surface<Window>>>;
 
+impl Storage {
+    fn new(surface: &Arc<Surface<Window>>, renderer: Renderer) -> Self {
+        let mut storage = Self {
+            renderer,
+            world: World::new(),
+            bounds: (0, 0),
+            textures: HashMap::new()
+        };
+
+        storage.update_bounds(surface);
+        storage
+    }
+
+    fn update_bounds(&mut self, surface: &Arc<Surface<Window>>) {
+        let window_bounds = surface.window().inner_size().to_logical::<u32>(surface.window().scale_factor());
+        let chunk_size = 300u32;
+        self.bounds = (window_bounds.width / chunk_size, window_bounds.height / chunk_size);
+    }
+}
+
 impl MainHandler for AppData {
     fn handle_event(&mut self, event: Event) -> Action<State> {
         match event {
+            Event::Resized(..) => {
+                let window = self.window().clone();
+                self.data.update_bounds(&window);
+                Action::Continue
+            },
             Event::CloseRequested => Action::Quit,
             _ => Action::Continue,
         }
@@ -62,9 +88,9 @@ impl MainHandler for AppData {
             );
         }
 
-        for x in 0..5 {
-            for y in 0..3 {
-                let key = ChunkKey::new(x, y);
+        for x in 0..=self.data.bounds.0 {
+            for y in 0..=self.data.bounds.1 {
+                let key = ChunkKey::new(x as i64, y as i64);
 
                 match self.data.textures.entry(key) {
                     Occupied(_) => continue,
@@ -79,9 +105,9 @@ impl MainHandler for AppData {
 
     fn handle_render(&self) {
         self.data.renderer.render(self.window(), |mut frame| {
-            for x in 0..5 {
-                for y in 0..3 {
-                    let key = ChunkKey::new(x, y);
+            for x in 0..=self.data.bounds.0 {
+                for y in 0..=self.data.bounds.1 {
+                let key = ChunkKey::new(x as i64, y as i64);
                     if let Some(&TextureEntry::Valid(ref texture)) = self.data.textures.get(&key) {
                         frame = frame.draw(
                             [(key.x * 300) as f32, (key.y * 300) as f32].into(),
@@ -114,11 +140,7 @@ fn main() {
         move |event_loop| Renderer::construct_window(event_loop, constructor_instance),
         move |surface| -> Result<_, InitError> {
             let renderer = Renderer::init_vulkan(&instance, surface)?;
-            Ok(Storage {
-                renderer,
-                world: World::new(),
-                textures: HashMap::new(),
-            })
+            Ok(Storage::new(surface, renderer))
         },
     )
     .expect("Unable to initialise application")
