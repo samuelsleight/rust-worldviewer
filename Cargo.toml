@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 bytemuck = "1.12.1"
 crossbeam-channel = "0.5.6"
+enumset = "1.0.11"
 stateloop = "0.7.0"
 vulkano = "0.30.0"
 vulkano-shaders = "0.30.0"
