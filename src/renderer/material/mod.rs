@@ -9,7 +9,6 @@ use vulkano::{
     },
     descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet},
     device::Device,
-    image::ImageViewAbstract,
     pipeline::{
         graphics::{
             color_blend::ColorBlendState,
@@ -29,9 +28,10 @@ pub use texture::TextureMaterial;
 mod texture;
 
 pub unsafe trait MaterialParams {
-    type Data;
+    type PipelineData;
+    type RenderData;
 
-    fn construct_data(&self, device: &Arc<Device>) -> Self::Data;
+    fn construct_data(&self, device: &Arc<Device>) -> Self::PipelineData;
 
     fn update(
         material: &Material<Self>,
@@ -40,12 +40,12 @@ pub unsafe trait MaterialParams {
             StandardCommandPoolBuilder,
         >,
         position: LogicalSize<f32>,
-        texture: Arc<dyn ImageViewAbstract>,
+        data: Self::RenderData,
     );
 }
 
 pub struct Material<Params: MaterialParams + ?Sized> {
-    data: Params::Data,
+    data: Params::PipelineData,
     pipeline: Arc<GraphicsPipeline>,
 }
 

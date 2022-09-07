@@ -1,11 +1,9 @@
 use stateloop::winit::dpi::LogicalSize;
-use std::sync::Arc;
 use vulkano::{
     command_buffer::{
         pool::standard::{StandardCommandPoolAlloc, StandardCommandPoolBuilder},
         AutoCommandBufferBuilder, CommandBufferUsage, PrimaryAutoCommandBuffer,
     },
-    image::ImageViewAbstract,
 };
 
 use super::{
@@ -95,8 +93,8 @@ where
 impl<'data, 'mat, Params: MaterialParams>
     RenderFrame<'data, frame_state::RenderPass<'mat, Params>>
 {
-    pub fn draw(mut self, position: LogicalSize<f32>, texture: Arc<dyn ImageViewAbstract>) -> Self {
-        Params::update(&self.state.material, &mut self.builder, position, texture);
+    pub fn draw(mut self, position: LogicalSize<f32>, render_data: Params::RenderData) -> Self {
+        Params::update(&self.state.material, &mut self.builder, position, render_data);
 
         self.builder.draw(4, 1, 0, 0).unwrap();
         self

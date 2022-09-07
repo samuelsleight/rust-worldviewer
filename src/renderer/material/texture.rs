@@ -7,7 +7,7 @@ use vulkano::{
     },
     descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet},
     pipeline::{Pipeline, PipelineBindPoint},
-    sampler::{Filter, Sampler, SamplerAddressMode, SamplerCreateInfo},
+    sampler::{Filter, Sampler, SamplerAddressMode, SamplerCreateInfo}, image::ImageViewAbstract,
 };
 
 use crate::renderer::shaders::MeshData;
@@ -21,9 +21,10 @@ pub struct TextureData {
 }
 
 unsafe impl MaterialParams for TextureMaterial {
-    type Data = TextureData;
+    type PipelineData = TextureData;
+    type RenderData = Arc<dyn ImageViewAbstract>;
 
-    fn construct_data(&self, device: &Arc<vulkano::device::Device>) -> Self::Data {
+    fn construct_data(&self, device: &Arc<vulkano::device::Device>) -> Self::PipelineData {
         let sampler = Sampler::new(
             device.clone(),
             SamplerCreateInfo {
@@ -45,8 +46,10 @@ unsafe impl MaterialParams for TextureMaterial {
             StandardCommandPoolBuilder,
         >,
         position: stateloop::winit::dpi::LogicalSize<f32>,
-        texture: Arc<dyn vulkano::image::ImageViewAbstract>,
+        render_data: Self::RenderData,
     ) {
+        let texture = render_data;
+
         let descriptor_set = PersistentDescriptorSet::new(
             material
                 .pipeline
