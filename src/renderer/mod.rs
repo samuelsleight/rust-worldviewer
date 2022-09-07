@@ -11,20 +11,8 @@ use vulkano::{
         MipmapsCount, SwapchainImage,
     },
     instance::Instance,
-    pipeline::{
-        graphics::{
-            color_blend::ColorBlendState,
-            input_assembly::{InputAssemblyState, PrimitiveTopology},
-            vertex_input::BuffersDefinition,
-            viewport::{Viewport, ViewportState},
-            GraphicsPipelineCreationError,
-        },
-        GraphicsPipeline,
-    },
-    render_pass::{
-        Framebuffer, FramebufferCreateInfo, RenderPass, RenderPassCreationError, Subpass,
-    },
-    sampler::{Filter, Sampler, SamplerAddressMode, SamplerCreateInfo},
+    pipeline::graphics::{viewport::Viewport, GraphicsPipelineCreationError},
+    render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass, RenderPassCreationError},
     shader::ShaderCreationError,
     single_pass_renderpass,
     swapchain::{
@@ -37,7 +25,8 @@ use vulkano_win::CreationError;
 
 use self::{
     frame::{frame_state, RenderFrame},
-    shaders::{SceneData, VertexConstants},
+    material::{Material, MaterialParams},
+    shaders::{SceneData, Shaders},
     vertex::Vertex,
 };
 
@@ -45,6 +34,8 @@ mod frame;
 mod init;
 mod shaders;
 mod vertex;
+
+pub mod material;
 
 pub struct CoreObjects {
     device: Arc<Device>,
@@ -58,11 +49,10 @@ pub struct RendererData {
 
     vertex_buffer: Arc<ImmutableBuffer<[Vertex]>>,
     uniform_buffer: CpuBufferPool<SceneData>,
-    pipeline: Arc<GraphicsPipeline>,
     render_pass: Arc<RenderPass>,
     framebuffers: Option<Vec<Arc<Framebuffer>>>,
 
-    sampler: Arc<Sampler>,
+    shaders: Shaders,
 
     viewport: Viewport,
     frame_future: Option<Box<dyn GpuFuture>>,
@@ -141,34 +131,6 @@ impl Renderer {
         .map_err(InitError::UnableToCreateVertexBuffer)?;
 
         let uniform_buffer = CpuBufferPool::<SceneData>::uniform_buffer(objects.device.clone());
-        let subpass = Subpass::from(render_pass.clone(), 0).unwrap();
-
-        let sampler = Sampler::new(
-            objects.device.clone(),
-            SamplerCreateInfo {
-                mag_filter: Filter::Linear,
-                min_filter: Filter::Linear,
-                address_mode: [SamplerAddressMode::ClampToEdge; 3],
-                ..Default::default()
-            },
-        )
-        .unwrap();
-
-        let pipeline = GraphicsPipeline::start()
-            .vertex_input_state(BuffersDefinition::new().vertex::<Vertex>())
-            .vertex_shader(
-                shaders.vertex.entry_point("main").unwrap(),
-                VertexConstants { quad_scale: 300.0 },
-            )
-            .input_assembly_state(
-                InputAssemblyState::new().topology(PrimitiveTopology::TriangleStrip),
-            )
-            .viewport_state(ViewportState::viewport_dynamic_scissor_irrelevant())
-            .fragment_shader(shaders.fragment.entry_point("main").unwrap(), ())
-            .color_blend_state(ColorBlendState::new(subpass.num_color_attachments()).blend_alpha())
-            .render_pass(subpass)
-            .build(objects.device.clone())
-            .map_err(InitError::UnableToCreatePipeline)?;
 
         Ok(Self {
             data: RefCell::new(RendererData {
@@ -176,17 +138,23 @@ impl Renderer {
 
                 vertex_buffer,
                 uniform_buffer,
-                pipeline,
                 render_pass,
                 framebuffers: None,
 
-                sampler,
+                shaders,
 
                 viewport,
                 frame_future: Some(Box::new(buffer_future)),
                 recreate_swapchain: false,
             }),
         })
+    }
+
+    pub fn create_material<Params>(&self, params: Params) -> Result<Material<Params>, InitError>
+    where
+        Params: MaterialParams,
+    {
+        Material::new(&self.data.borrow(), params)
     }
 
     pub fn create_texture<I>(
@@ -229,7 +197,7 @@ impl Renderer {
 
     pub fn render<F>(&self, surface: &Arc<Surface<Window>>, frame_callback: F)
     where
-        F: FnOnce(RenderFrame<frame_state::RenderPass>) -> RenderFrame<frame_state::Done>,
+        F: FnOnce(RenderFrame<frame_state::Begin>) -> RenderFrame<frame_state::Done>,
     {
         let mut data = self.data.borrow_mut();
 
@@ -293,7 +261,9 @@ impl Renderer {
             data.recreate_swapchain = true;
         }
 
-        let frame = RenderFrame::new(&mut data, image_num).begin(
+        let frame = RenderFrame::new(
+            &mut data,
+            image_num,
             surface
                 .window()
                 .inner_size()

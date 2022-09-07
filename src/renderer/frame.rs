@@ -1,36 +1,50 @@
 use stateloop::winit::dpi::LogicalSize;
-use std::{marker::PhantomData, sync::Arc};
+use std::sync::Arc;
 use vulkano::{
     command_buffer::{
         pool::standard::{StandardCommandPoolAlloc, StandardCommandPoolBuilder},
         AutoCommandBufferBuilder, CommandBufferUsage, PrimaryAutoCommandBuffer,
-        RenderPassBeginInfo, SubpassContents,
     },
-    descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet},
     image::ImageViewAbstract,
-    pipeline::{Pipeline, PipelineBindPoint},
 };
 
-use super::{shaders::MeshData, RendererData};
+use super::{
+    material::{Material, MaterialParams},
+    RendererData,
+};
 
 pub mod frame_state {
+    use crate::renderer::material::{Material, MaterialParams};
+
     pub struct Begin;
-    pub struct RenderPass;
+    pub struct RenderPass<'mat, Params: MaterialParams> {
+        pub material: &'mat Material<Params>,
+    }
     pub struct Done;
 }
+
+pub trait ReadyForMaterial {}
+
+impl ReadyForMaterial for frame_state::Begin {}
+impl<'mat, Params: MaterialParams> ReadyForMaterial for frame_state::RenderPass<'mat, Params> {}
 
 pub struct RenderFrame<'data, State> {
     data: &'data mut RendererData,
     image_num: usize,
+    window_size: LogicalSize<f32>,
     builder: AutoCommandBufferBuilder<
         PrimaryAutoCommandBuffer<StandardCommandPoolAlloc>,
         StandardCommandPoolBuilder,
     >,
-    _marker: PhantomData<State>,
+    state: State,
 }
 
 impl<'data> RenderFrame<'data, frame_state::Begin> {
-    pub fn new(data: &'data mut RendererData, image_num: usize) -> Self {
+    pub fn new(
+        data: &'data mut RendererData,
+        image_num: usize,
+        window_size: LogicalSize<f32>,
+    ) -> Self {
         let builder = AutoCommandBufferBuilder::primary(
             data.objects.device.clone(),
             data.objects.queue.family(),
@@ -41,100 +55,51 @@ impl<'data> RenderFrame<'data, frame_state::Begin> {
         Self {
             data,
             image_num,
+            window_size,
             builder,
-            _marker: PhantomData,
-        }
-    }
-
-    pub fn begin(
-        mut self,
-        window_size: LogicalSize<f32>,
-    ) -> RenderFrame<'data, frame_state::RenderPass> {
-        let uniform_buffer = self.data.uniform_buffer.next(window_size.into()).unwrap();
-
-        let descriptor_set = PersistentDescriptorSet::new(
-            self.data
-                .pipeline
-                .layout()
-                .set_layouts()
-                .get(0)
-                .unwrap()
-                .clone(),
-            [WriteDescriptorSet::buffer(0, uniform_buffer)],
-        )
-        .unwrap();
-
-        self.builder
-            .begin_render_pass(
-                RenderPassBeginInfo {
-                    clear_values: vec![Some([1.0, 0.0, 1.0, 1.0].into())],
-                    ..RenderPassBeginInfo::framebuffer(
-                        self.data.framebuffers.as_ref().unwrap()[self.image_num].clone(),
-                    )
-                },
-                SubpassContents::Inline,
-            )
-            .unwrap()
-            .set_viewport(0, [self.data.viewport.clone()])
-            .bind_pipeline_graphics(self.data.pipeline.clone())
-            .bind_descriptor_sets(
-                PipelineBindPoint::Graphics,
-                self.data.pipeline.layout().clone(),
-                0,
-                descriptor_set,
-            )
-            .bind_vertex_buffers(0, self.data.vertex_buffer.clone());
-
-        RenderFrame {
-            data: self.data,
-            builder: self.builder,
-            image_num: self.image_num,
-            _marker: PhantomData,
+            state: frame_state::Begin,
         }
     }
 }
 
-impl<'data> RenderFrame<'data, frame_state::RenderPass> {
-    pub fn draw(mut self, position: LogicalSize<f32>, texture: Arc<dyn ImageViewAbstract>) -> Self {
-        let descriptor_set = PersistentDescriptorSet::new(
-            self.data
-                .pipeline
-                .layout()
-                .set_layouts()
-                .get(1)
-                .unwrap()
-                .clone(),
-            [WriteDescriptorSet::image_view_sampler(
-                0,
-                texture,
-                self.data.sampler.clone(),
-            )],
-        )
-        .unwrap();
-
-        self.builder
-            .push_constants(
-                self.data.pipeline.layout().clone(),
-                0,
-                MeshData {
-                    offset: position.into(),
-                },
-            )
-            .bind_descriptor_sets(
-                PipelineBindPoint::Graphics,
-                self.data.pipeline.layout().clone(),
-                1,
-                descriptor_set,
-            )
-            .draw(4, 1, 0, 0)
+impl<'data, State> RenderFrame<'data, State>
+where
+    State: ReadyForMaterial,
+{
+    pub fn material<Params: MaterialParams>(
+        mut self,
+        material: &Material<Params>,
+    ) -> RenderFrame<'data, frame_state::RenderPass<Params>> {
+        let uniform_buffer = self
+            .data
+            .uniform_buffer
+            .next(self.window_size.into())
             .unwrap();
+        material.bind(
+            &self.data,
+            &mut self.builder,
+            self.image_num,
+            uniform_buffer,
+        );
 
         RenderFrame {
             data: self.data,
-            builder: self.builder,
             image_num: self.image_num,
-            _marker: PhantomData,
+            window_size: self.window_size,
+            builder: self.builder,
+            state: frame_state::RenderPass { material },
         }
+    }
+}
+
+impl<'data, 'mat, Params: MaterialParams>
+    RenderFrame<'data, frame_state::RenderPass<'mat, Params>>
+{
+    pub fn draw(mut self, position: LogicalSize<f32>, texture: Arc<dyn ImageViewAbstract>) -> Self {
+        Params::update(&self.state.material, &mut self.builder, position, texture);
+
+        self.builder.draw(4, 1, 0, 0).unwrap();
+        self
     }
 
     pub fn finish(mut self) -> RenderFrame<'data, frame_state::Done> {
@@ -142,9 +107,10 @@ impl<'data> RenderFrame<'data, frame_state::RenderPass> {
 
         RenderFrame {
             data: self.data,
-            builder: self.builder,
             image_num: self.image_num,
-            _marker: PhantomData,
+            window_size: self.window_size,
+            builder: self.builder,
+            state: frame_state::Done,
         }
     }
 }

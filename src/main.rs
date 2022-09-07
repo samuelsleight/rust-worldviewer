@@ -1,5 +1,8 @@
 use enumset::{EnumSet, EnumSetType};
-use renderer::{InitError, Renderer};
+use renderer::{
+    material::{Material, TextureMaterial},
+    InitError, Renderer,
+};
 use stateloop::{
     app::{App, Data, Event, Window},
     state::Action,
@@ -46,6 +49,7 @@ enum TextureEntry {
 struct Storage {
     renderer: Renderer,
     world: World,
+    material: Material<TextureMaterial>,
     bounds: (u32, u32),
     offset: (i64, i64),
     chunk_offset: (i64, i64),
@@ -56,9 +60,12 @@ type AppData = Data<Storage, Arc<Surface<Window>>>;
 
 impl Storage {
     fn new(surface: &Arc<Surface<Window>>, renderer: Renderer) -> Self {
+        let material = renderer.create_material(TextureMaterial).unwrap();
+
         let mut storage = Self {
             renderer,
             world: World::new(),
+            material,
             bounds: (0, 0),
             offset: (0, 0),
             chunk_offset: (0, 0),
@@ -172,7 +179,9 @@ impl MainHandler for AppData {
     }
 
     fn handle_render(&self, _: EnumSet<InputState>) {
-        self.data.renderer.render(self.window(), |mut frame| {
+        self.data.renderer.render(self.window(), |frame| {
+            let mut frame = frame.material(&self.data.material);
+
             for x in (0..=self.data.bounds.0 + 2).map(|x| x as i64 - 1) {
                 for y in (0..=self.data.bounds.1 + 2).map(|y| y as i64 - 1) {
                     let key = ChunkKey::new(
